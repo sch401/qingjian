@@ -3,6 +3,22 @@
 use super::*;
 
 #[test]
+fn legacy_and_manual_triggers_keep_distinct_waiting_modes() {
+    let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+    let mut engine = engine().with_predictor(Box::new(EchoPredictor {
+        submitted: submitted.clone(),
+        replies: Vec::new(),
+        sentence: false,
+    }));
+    engine.set_input("kaifa");
+    assert!(engine.request_prediction(None, &[]).is_some());
+    assert!(engine.request_manual_prediction(None, &[]).is_some());
+    let requests = submitted.borrow();
+    assert!(!requests[0].manual);
+    assert!(requests[1].manual);
+}
+
+#[test]
 fn question_mode_asks_the_cloud_and_shows_answers_unvalidated() {
     let submitted = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let answer = CloudWord {
@@ -185,6 +201,12 @@ fn prediction_request_uses_the_scope_only() {
     assert_eq!(request.pinyin, "kai'fa");
     assert_eq!(request.letters, "kaifa");
     assert_eq!(request.syllables, 2);
+    assert!(!request.want_sentence);
+
+    // 关闭续写后，简拼只剩本地候选，整句专用请求也不发送。
+    engine.set_input("zhsh");
+    assert_eq!(engine.request_prediction(None, &[]), None);
+    assert_eq!(submitted.borrow().len(), 1);
 }
 
 #[test]

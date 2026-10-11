@@ -86,6 +86,12 @@ TSV 解析、查询与生成工具把 `lue` / `nue` 统一成 `lve` / `nve`。
 ## crates/qingjian-predict
 
 - `CloudPredictor`：`Predictor` trait 的网络实现（async-openai，OpenAI 兼容接口，默认 DeepSeek），后台线程防抖 / 缓存 / 超时，`submit` / `poll` 非阻塞。
+  Worker 复用现有通道，以 `None` 取消待发请求；`debounce_ms` 缺省 800、`min_interval_ms` 缺省 3000，失败调用也计入间隔，等待中合并为最新请求。
+  `request_prediction` 保留旧平台的等待入口；`request_automatic_prediction` 读取自动开关，`request_manual_prediction` 显式跳过防抖。缓存命中跳过网络间隔；过期结果按序号丢弃。
+  `CandidateLayout::set_cloud` 保留末尾布局；`set_cloud_first` 按模型顺序置顶，同文普通候选隐藏、自定义短语固定位置保留。平台接入优先入口时同时约束高亮和翻页后的更新。
+  ChatClient 复用 async-openai 自带的 `ReqwestService` 直接传输，关闭接口错误后的 SDK 隐式重试；用量先从原始响应记录，再解析正文。
+  `CloudPredictor::new_with_usage` / `ConnectionTest::start_with_usage` 可传入 `api-usage.json`。`ApiUsageStats` 通过 std 文件锁串行合并更新并原子写入，记录真实请求、响应、失败、缺用量与输入／输出／缓存 Token；缓存与防抖取消不计数，损坏文件保留并报错。
+  `[predict] sentence` 进入请求与缓存键；关闭时省略续写提示规则，解析丢弃模型多给的续写。简拼只需续写却已关闭续写时省去调用。缺省模型更新为 `deepseek-flash`，用户已有模型配置保留。
   `PredictConfig` 是配置的 `[predict]` 分节。只在组句中联想，一次请求给云端词（容错校验后补进候选第一页末尾 `[predict] slots` 格，缺省 2，不预留不占位，
   前面的本地候选不挪；排布在 Core `CandidateLayout`）和整句补全（preedit 右侧，Tab）；上屏后不联想，本地历史不进请求。
   简拼（半数以上音节是缩写）的请求 `max_items = 0`，只求整句补全（`prediction::mostly_abbreviated`）：按声母凑出来的词大多是生造词，
