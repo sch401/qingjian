@@ -5,7 +5,7 @@
 - 模型：两档字级 decoder，small 23M、base 36M / 上下文 256，语料为中文维基 + LCCC（训练细节不在本仓库）。
 - 推理：`crates/qingjian-neural`（candle），与训练脚本的 Python 打分对拍一致。M1 上 Metal 后端最快：空前文单条 6 ms，
   64 字前文 × 8 条 133 ms；CPU（Accelerate）约慢一倍，candle 自带 gemm 再慢一倍。按 token 算吞吐很低，是每层十几个小算子的调度开销在主导。
-- 接法：Core `sentence::convert_paths` 出 Viterbi 前 6 条路径，`Engine` 按 `路径分 + λ·(神经分 − 静态二元分)` 重排，
+- 接法：Core `sentence::convert_paths` 出 Viterbi 前 24 条路径，`Engine` 按 `路径分 + λ·(神经分 − 静态二元分)` 重排，
   神经分只替换静态二元的判断，个人 n-gram、用户加分、敲错代价原样保留（早先试过 `(1 − λ)·路径分 + λ·神经分` 的线性混分，
   λ 0.5 时个人计数被稀释得厉害）。前文是本会话最近上屏的 64 个字符。只有 CLI `--neural` 接它。
 

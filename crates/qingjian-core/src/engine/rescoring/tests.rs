@@ -19,6 +19,54 @@ impl SentenceScorer for Prefers {
 }
 
 #[test]
+fn sentence_middle_alternatives_survive_and_mode_comparisons_preserve_scores() {
+    const TEXT: &str = "来试一试这个新输入法好不好用";
+    const KEYS: &str = "laishiyishizhegexinshurufahaobuhaoyong";
+    for english in [false, true] {
+        for asynchronous in [false, true] {
+            let mut engine = Engine::new(
+                Dictionary::parse(
+                    "来\tlai\t100\n是\tshi\t1000\n试\tshi\t100\n一\tyi\t100\n\
+                 这个\tzhe ge\t100\n新\txin\t100\n输入法\tshu ru fa\t100\n\
+                 好\thao\t100\n不\tbu\t100\n用\tyong\t100\n",
+                )
+                .unwrap(),
+            );
+            if english {
+                engine = engine.with_english(
+                    qingjian_dictionary::WordList::parse("Yong\tyong\t2000\n").unwrap(),
+                );
+            }
+            let scorer = Box::new(Prefers(TEXT));
+            let mut engine = if asynchronous {
+                engine.with_async_sentence_scorer(scorer, Some(1.0), None, None)
+            } else {
+                engine.with_sentence_scorer(scorer, Some(1.0), None, None)
+            };
+            engine.set_input(KEYS);
+            engine.query().unwrap();
+            if asynchronous {
+                assert!(engine.request_rescoring());
+                let start = Instant::now();
+                while !engine.poll_rescoring() {
+                    assert!(start.elapsed() < Duration::from_secs(5));
+                    std::thread::sleep(Duration::from_millis(5));
+                }
+            }
+            let query = engine.query().unwrap();
+            assert_eq!(
+                query.candidates.items[0].text, TEXT,
+                "english={english}, async={asynchronous}"
+            );
+            assert_eq!(query.candidates.items[0].syllables.concat(), KEYS);
+            assert!(!engine.request_rescoring());
+            assert_eq!(engine.commit(&query.candidates.items[0]), TEXT);
+            assert!(engine.composition().is_empty());
+        }
+    }
+}
+
+#[test]
 fn sync_and_async_rescorers_compare_all_legal_segmentations() {
     // 静态频率偏爱贪心切分；本地模型应能在同一批路径中选中另一种合法切分。
     for asynchronous in [false, true] {
@@ -53,6 +101,35 @@ fn sync_and_async_rescorers_compare_all_legal_segmentations() {
         assert_eq!(query.marked_text(), "xian'gei'wo'kan'kan");
         assert!(!engine.request_rescoring());
     }
+}
+
+#[test]
+fn mixed_sentence_rescoring_preserves_the_winning_head_scores() {
+    let dictionary = Dictionary::parse(
+        "先\txian\t10000\n西安\txi an\t100\n给\tgei\t10000\n我\two\t10000\n\
+         看看\tkan kan\t10000\n茹\tru\t100\n斯\tsi\t100\n特\tte\t100\n",
+    )
+    .unwrap();
+    let mut engine = Engine::new(dictionary)
+        .with_english(qingjian_dictionary::WordList::parse("rust\trust\t3740\n").unwrap())
+        .with_async_sentence_scorer(Box::new(Prefers("西安给我看看")), Some(1.0), None, None);
+    engine.set_input("xiangeiwokankanrust");
+    let first = engine.query().unwrap();
+    assert_eq!(first.candidates.items[0].text, "先给我看看rust");
+    assert!(engine.request_rescoring());
+    let start = Instant::now();
+    while !engine.poll_rescoring() {
+        assert!(start.elapsed() < Duration::from_secs(5));
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    let query = engine.query().unwrap();
+    assert_eq!(query.candidates.items[0].text, "西安给我看看rust");
+    assert!(!engine.request_rescoring());
+    assert_eq!(
+        engine.commit(&query.candidates.items[0]),
+        "西安给我看看rust"
+    );
+    assert!(engine.composition().is_empty());
 }
 
 fn path(text: &str, score: f64) -> Conversion {

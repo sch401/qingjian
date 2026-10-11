@@ -33,7 +33,8 @@ impl Engine {
                 // 整段读成拼音的那条本来就是「另一种读法」，只给一条
                 if tail.competes
                     && let Ok(full) = parser::segment(keys)
-                    && let Some(plain) = self.plain_sentence(items, &full, typos, false).pop()
+                    && let Some(plain) =
+                        self.plain_sentence(items, &full, typos, false, false).pop()
                 {
                     let position = items.len().min(1);
                     items.insert(position, plain);
@@ -42,7 +43,7 @@ impl Engine {
             _ => {
                 // 整段本身就是英文词（`database`）：备选整句会把那条英文候选再往后挤，只给一条
                 let alternates = !self.scope_is_english_word();
-                let sentences = self.plain_sentence(items, segmentations, typos, alternates);
+                let sentences = self.plain_sentence(items, segmentations, typos, alternates, true);
                 let position = leading_english(items);
                 // 词图读不通整段时模型直接生成的整句排在词图那几条前面：这时词图给的是把英文段
                 // 硬读成拼音的结果（`yongdockerbushuhenfangbian` → 用的哦乘客仍不熟很方便），排它前面没有可惜的
@@ -84,6 +85,7 @@ impl Engine {
         segmentations: &[Segmentation],
         typos: bool,
         alternates: bool,
+        rescore: bool,
     ) -> Vec<Candidate> {
         let Some(best) = segmentations.first() else {
             return Vec::new();
@@ -96,7 +98,15 @@ impl Engine {
         } else {
             1
         };
-        let mut paths = self.sentence_paths(segmentations, typos, false, wanted);
+        // 备选输入方式按静态模型给一条，模型缓存只供当前首选输入方式使用。
+        let convert = |typos| {
+            if rescore {
+                self.sentence_paths(segmentations, typos, false, wanted)
+            } else {
+                self.static_sentence_paths(segmentations, typos, false, wanted)
+            }
+        };
+        let mut paths = convert(typos);
         if paths.is_empty() {
             return Vec::new();
         }
@@ -108,7 +118,7 @@ impl Engine {
                 .iter()
                 .any(|c| c.kind == CandidateKind::Chinese && c.syllables.concat() == letters);
             if spelled_exactly {
-                paths = self.sentence_paths(segmentations, false, false, wanted);
+                paths = convert(false);
             }
         }
         let mut out: Vec<Candidate> = Vec::new();
@@ -175,20 +185,20 @@ impl Engine {
         segmentations: &[Segmentation],
         typos: bool,
     ) -> Option<Conversion> {
-        self.convert_sentence_with(segmentations, typos, false)
+        self.sentence_paths(segmentations, typos, false, 1)
+            .into_iter()
+            .next()
     }
 
-    /// 同 [`Self::convert_sentence`]，`whole` 为真时末尾单字母也读（[`sentence::convert_whole`]），只给比分用。
-    /// 接了神经重打分器时取前 [`RESCORE_PATHS`] 条路径，按「路径分 + λ·(神经分 − 静态分)」重排（[`Self::rescore_paths`]）：
-    /// 神经分替换的是静态二元模型那部分判断，个人 n-gram 插值、用户加分、敲错代价原样保留。
-    /// 返回重排后的第一条；`score` 始终是静态尺度的路径分，神经分不写进去，跨读法的比较才还成立。
-    pub(in crate::engine) fn convert_sentence_with(
+    /// 输入方式与拼写纠正的静态比较，不触发重排、不改动展示候选的模型缓存。
+    /// `whole` 为真时末尾单字母也读（[`sentence::convert_whole`]），使被比较的读法覆盖同样的按键。
+    pub(in crate::engine) fn convert_sentence_static(
         &self,
         segmentations: &[Segmentation],
         typos: bool,
         whole: bool,
     ) -> Option<Conversion> {
-        self.sentence_paths(segmentations, typos, whole, 1)
+        self.static_sentence_paths(segmentations, typos, whole, 1)
             .into_iter()
             .next()
     }
@@ -202,12 +212,32 @@ impl Engine {
         whole: bool,
         want: usize,
     ) -> Vec<Conversion> {
-        let dictionaries = self.all_dictionaries();
         let k = if self.has_sentence_scorer() {
             RESCORE_PATHS.max(want)
         } else {
             want
         };
+        let mut paths = self.static_sentence_paths(segmentations, typos, whole, k);
+        if paths.len() > 1 {
+            let floor = paths[0].score - self.neural_margin;
+            paths.retain(|p| p.score >= floor);
+            // 英文尾段只转换头段，重排的条件也只覆盖头段。
+            if let Some(best) = segmentations.first() {
+                let keys: String = best.patterns().iter().map(|p| p.text).collect();
+                self.rescore_paths(&mut paths, &keys);
+            }
+        }
+        paths
+    }
+
+    fn static_sentence_paths(
+        &self,
+        segmentations: &[Segmentation],
+        typos: bool,
+        whole: bool,
+        k: usize,
+    ) -> Vec<Conversion> {
+        let dictionaries = self.all_dictionaries();
         let convert = |expanded: &Expanded| {
             sentence::convert_paths(
                 &dictionaries,
@@ -221,9 +251,9 @@ impl Engine {
                 &mut self.span_cache.borrow_mut(),
             )
         };
-        let Some(best) = segmentations.first() else {
+        if segmentations.is_empty() {
             return Vec::new();
-        };
+        }
         let incomplete = segmentations
             .iter()
             .map(Segmentation::incomplete_count)
@@ -255,16 +285,6 @@ impl Engine {
                 }
             }
         }
-        let mut paths = unique;
-        // 与最优路径差得太远的不参与：那种差距多半是个人 n-gram 拉开的
-        if paths.len() > 1 {
-            let floor = paths[0].score - self.neural_margin;
-            paths.retain(|p| p.score >= floor);
-            // 条件是这批路径共同解释的那段按键，不是整个作用域：英文尾巴那条只转换了 head，
-            // 拿整段当条件会让它凭空背上没覆盖的字母
-            let keys: String = best.patterns().iter().map(|p| p.text).collect();
-            self.rescore_paths(&mut paths, &keys);
-        }
-        paths
+        unique
     }
 }

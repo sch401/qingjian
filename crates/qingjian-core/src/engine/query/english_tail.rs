@@ -131,7 +131,7 @@ impl Engine {
     pub(super) fn mixed_beats_plain(&self, scope: &str, tail: &EnglishTail) -> bool {
         let convert = |text: &str, whole: bool| {
             let segmentations = parser::segment(text).ok()?;
-            self.convert_sentence_with(&segmentations, true, whole)
+            self.convert_sentence_static(&segmentations, true, whole)
         };
         let (Some(head), Some(plain)) = (
             convert(&scope[..tail.head_len], false),

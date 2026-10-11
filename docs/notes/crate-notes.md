@@ -129,7 +129,7 @@ Core 的 `sentence::SentenceScorer` 有两个实现，同一个 trait 拿到**�
   （配对 McNemar p=0.003，留出验证 λ 未过拟合），中位延迟 18.5 对 22.0 ms，而且同一个模型还能造词。
   字级模型没有下岗，它是移动端「光标联想」那类 `P(下一段 | 前文)` 功能的基础——P2C 的 `<eos>` 明确切断上文，结构上做不了那件事。
 
-Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 6 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.5，
+Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_PATHS` = 24 条路径按 `路径分 + λ·(神经分 − 静态二元分)` 重排（λ `NEURAL_WEIGHT` 0.5，
 个人 n-gram / 用户加分 / 代价不动）。**神经分只决定名次，不写回 `Conversion::score`**：P2C 打的是 `log P(汉字 | 拼音)`，
 比静态分高十几二十 nat 且抬升随句长变化，写回去会污染跨读法的比较（拼写纠错的原样 vs 纠正、混输的头段 vs 整段），
 那两处的门槛都按静态尺度定；按贝叶斯展开也只在同一串按键下可比。分走「(前文, 按键) + 文本 → 神经分」缓存 `NeuralCache`（两个条件任一变了整张作废）；
@@ -137,6 +137,10 @@ Engine 侧在 `engine/rescoring/`：接了打分器就取 Viterbi 前 `RESCORE_P
 同步打分器（`with_sentence_scorer`，CLI 评测）当场补分，
 异步的（`with_async_sentence_scorer`，后台线程 `RescoreWorker`）查询不等模型：缺分的记下来，壳停键后 `request_rescoring`、`poll_rescoring` 到了再 `query` 一次。
 前文优先用壳给的应用光标前文（`set_rescoring_context`），没有用本会话最近 64 个上屏字符。CLI `--neural <导出目录>`（`--neural-weight` / `--neural-context` / `--neural-async`）。
+
+词图搜索（`sentence/viterbi/`）保留多个前驱，束宽 32；按已转换文本及前二词去重，再剪枝，避免同句子的重复分词挤掉不同中段读法。
+例如「来试一试」的路径在接上「这个新输入法好不好用」后继续参与重排。输入方式与拼写纠正的比较走 `convert_sentence_static`；
+混输中输掉的整段拼音备选也只按静态模型转换，模型缓存仅用于当前首选输入方式，避免头段与整段按键来回切换使异步评分反复失效。
 
 P2C 教师强制打分 `CharScorer::score_p2c(keys, texts)`：前缀 `<eos> + 完整拼音 + <sep>`，只累加候选字符的 log 概率（不计 EOS），
 共享拼音前缀 KV，候选批量前向；超过上下文时报错，不截断拼音。CLI 实验入口 `--eval-p2c data/models/hanzhang-tongbian/hanzhang-tongbian-small.qjm --eval-text data/eval/sentences.tsv`，
