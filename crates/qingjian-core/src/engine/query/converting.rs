@@ -5,7 +5,7 @@ use crate::candidate::{Candidate, CandidateKind};
 use crate::engine::{ALTERNATE_MIN_SYLLABLES, Engine, Learner, RESCORE_PATHS, SENTENCE_CANDIDATES};
 use crate::fuzzy::Expanded;
 use crate::parser::{self, Segmentation};
-use crate::sentence::{self, Conversion};
+use crate::sentence::{self, Conversion, Personal};
 
 impl Engine {
     /// 整句候选。没有英文尾段时是整段拼音的转换（[`Self::plain_sentence`]），排在开头的英文候选之后。
@@ -179,7 +179,8 @@ impl Engine {
     }
 
     /// 跑一次整句转换：先按原拼音与已启用的模糊音读；读不通时才补敲错边。
-    /// 静态语言模型与个人 n-gram 插值，用户选择次数加分。`typos` 为假时不补敲错边。
+    /// 本地模型重排时按整句选择学习偏好；未接模型时用个人 n-gram 与词频加分。
+    /// `typos` 为假时不补敲错边。
     pub(in crate::engine) fn convert_sentence(
         &self,
         segmentations: &[Segmentation],
@@ -203,8 +204,7 @@ impl Engine {
             .next()
     }
 
-    /// 重排后的整句路径，最好的在前。`want` 是调用方要几条：只要一条时没接模型就只算一条
-    /// （拼写纠错对每个候选都要转一次，多算几条纯是浪费）；要备选时至少算这么多条。
+    /// 重排后的整句路径，最好的在前。`want` 是调用方要几条：未接模型时只算所需条数。
     pub(in crate::engine) fn sentence_paths(
         &self,
         segmentations: &[Segmentation],
@@ -238,6 +238,14 @@ impl Engine {
         k: usize,
     ) -> Vec<Conversion> {
         let dictionaries = self.all_dictionaries();
+        // 本地整句模型按整段拼音判断。常用单字和短接续的历史次数不反复加到每个位置，
+        // 否则在别处选过的「是 / 一」会挤掉「试一试」。整句选择的偏好在重排时加回。
+        let neural = self.has_sentence_scorer() && self.neural_weight > 0.0;
+        let personal = if neural {
+            Personal::NONE
+        } else {
+            self.personal()
+        };
         let convert = |expanded: &Expanded| {
             sentence::convert_paths(
                 &dictionaries,
@@ -245,8 +253,8 @@ impl Engine {
                 whole,
                 k,
                 &*self.language_model,
-                self.personal(),
-                |text| self.learner.weight(text),
+                personal,
+                |text| if neural { 0 } else { self.learner.weight(text) },
                 |index, syllable| expanded.cost(index, syllable),
                 &mut self.span_cache.borrow_mut(),
             )

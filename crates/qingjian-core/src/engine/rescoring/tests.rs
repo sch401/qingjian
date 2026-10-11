@@ -1,7 +1,14 @@
 use std::time::{Duration, Instant};
 
+use qingjian_dictionary::Dictionary;
+
 use super::*;
-use crate::sentence::SentenceWord;
+use crate::sentence::{SentenceScorer, SentenceWord, UserNgram};
+
+#[path = "tests/learned.rs"]
+mod learned;
+
+use learned::Learned;
 
 /// 这几个测试里路径共同解释的那段按键。
 const KEYS: &str = "kaifang";
@@ -37,6 +44,10 @@ fn sentence_middle_alternatives_survive_and_mode_comparisons_preserve_scores() {
                     qingjian_dictionary::WordList::parse("Yong\tyong\t2000\n").unwrap(),
                 );
             }
+            // 模型加载前格子已被查过；别处常选的「是 / 一」不能挤掉本句的「试一试」。
+            engine = engine.with_learner(Box::new(Learned::biased()));
+            engine.set_input(KEYS);
+            engine.query().unwrap();
             let scorer = Box::new(Prefers(TEXT));
             let mut engine = if asynchronous {
                 engine.with_async_sentence_scorer(scorer, Some(1.0), None, None)
@@ -166,6 +177,25 @@ fn sync_scorer_reorders_paths_in_place() {
     assert!((paths[0].score - -11.0).abs() < 1e-9);
     assert!((paths[1].score - -10.0).abs() < 1e-9);
     assert!(!engine.rescoring_pending());
+}
+
+#[test]
+fn rescoring_preferences_apply_only_to_the_same_full_input() {
+    for input in [KEYS, "shiyishi"] {
+        let engine = engine()
+            .with_learner(Box::new(Learned {
+                ngram: UserNgram::default(),
+                chosen: Some((input, "开放")),
+            }))
+            .with_sentence_scorer(Box::new(Prefers("neither")), Some(0.5), None, None);
+        let mut paths = vec![path("开饭", -10.0), path("开放", -11.0)];
+        engine.rescore_paths(&mut paths, KEYS);
+        assert_eq!(paths[0].text, if input == KEYS { "开放" } else { "开饭" });
+        assert_eq!(
+            paths.iter().find(|p| p.text == "开放").unwrap().score,
+            -11.0
+        );
+    }
 }
 
 #[test]
