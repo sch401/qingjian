@@ -8,7 +8,7 @@ pub struct PredictConfig {
     /// 是否启用。
     pub enabled: bool,
 
-    /// 停顿后自动联想，由新自动联想入口读取。
+    /// 停顿后自动联想；Windows 缺省关闭，使用快捷键按需调用。
     pub automatic: bool,
 
     /// OpenAI 兼容接口地址（不含 `/chat/completions`）。
@@ -54,7 +54,7 @@ impl Default for PredictConfig {
     fn default() -> Self {
         Self {
             enabled: false,
-            automatic: true,
+            automatic: !cfg!(windows),
             base_url: "https://api.deepseek.com".to_owned(),
             model: "deepseek-flash".to_owned(),
             api_key: None,

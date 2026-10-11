@@ -192,6 +192,8 @@ translation = "ctrl"
 translation_second = "shift+ctrl"
 # 把应用里选中的文字译成学习语言（要开着云服务）：译文先出现在候选窗口，回车替换选中的文字，Esc 保留原文
 translate_selection = "ctrl+alt+t"
+# 输入拼音时按需调用 AI；只在组句中生效
+predict = "ctrl+alt+j"
 # 数字键配这些修饰键删掉候选：用户词（云端选过的、自动造的）整个删掉，词库里的词清掉对它的学习记录。组句中要打感叹号先把词上屏
 delete_candidate = "shift"
 "#
@@ -201,7 +203,7 @@ delete_candidate = "shift"
 #[cfg(windows)]
 macro_rules! template_predict_automatic {
     () => {
-        "automatic = true\n"
+        "automatic = false\n"
     };
 }
 
@@ -352,7 +354,7 @@ enabled = true
 # 云联想：把光标附近的文本发到下面的接口，让模型补全整句 / 联想下文。默认关闭。
 # 开启后菜单栏的「中 / 英」旁会带一个云朵标识；Secure Input（密码框）里绝不发送。
 enabled = false
-# 自动联想；新自动入口读取此开关
+# 自动联想：Windows 默认按需调用，输入拼音后按 Ctrl+Alt+J；macOS 默认自动
 "#,
     template_predict_automatic!(),
     r#"# 自动联想与按需联想共用最短网络请求间隔；等待中只保留最新输入，上屏或清空后取消待发请求

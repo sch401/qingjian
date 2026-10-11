@@ -205,7 +205,7 @@ impl Router {
             self.config.cloud_slots,
         );
         if !cloud.is_empty() {
-            rebuilt.set_cloud(cloud);
+            rebuilt.set_cloud_first(cloud);
         }
         *layout = rebuilt;
         (*preedit, *cursor, *typed_keys) = marked_parts(&query);
