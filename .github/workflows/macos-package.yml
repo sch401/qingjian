@@ -1,0 +1,65 @@
+# 本地试用版的 macOS 构建方案：上传 Actions 构建产物，不创建 Release。
+name: macos-package
+
+on:
+  push:
+    branches: [codex/macos-package]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: macos-package-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  package:
+    runs-on: macos-26
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: dtolnay/rust-toolchain@7e38f4b43b4db5c8dd498af069a4f6196df1d067 # v1
+        with:
+          toolchain: 1.96.0
+          components: clippy
+          targets: aarch64-apple-darwin, x86_64-apple-darwin
+
+      - uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Check macOS shell
+        run: |
+          cargo clippy -p qingjian-macos --all-targets --locked -- -D warnings
+          cargo test -p qingjian-macos --locked
+
+      - name: Fetch verified dictionaries and local models
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: tools/release/data-fetch.sh
+
+      - name: Build Apple Silicon installer
+        run: QINGJIAN_TARGET=aarch64-apple-darwin apps/macos/scripts/bundle.sh --pkg
+
+      - name: Build Intel installer
+        run: QINGJIAN_TARGET=x86_64-apple-darwin apps/macos/scripts/bundle.sh --pkg
+
+      - name: Generate checksums
+        working-directory: target/pkg
+        run: shasum -a 256 *.pkg > SHA256SUMS
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: qingjian-macos-${{ github.sha }}
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 14
+          path: |
+            target/pkg/*.pkg
+            target/pkg/SHA256SUMS
