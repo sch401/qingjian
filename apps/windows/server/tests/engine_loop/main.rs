@@ -5,6 +5,7 @@ mod click;
 mod cloud;
 mod composing;
 mod english;
+mod highlight;
 mod modes;
 mod rescoring;
 mod shortcuts;

@@ -2,6 +2,7 @@ use qingjian_core::ModeKeys;
 use serde::{Deserialize, Serialize};
 
 use super::PageKeys;
+use super::highlight_keys::HighlightKeys;
 use super::key_combo::KeyCombo;
 use super::modifiers::Modifiers;
 use super::switch_key::SwitchKeys;
@@ -16,6 +17,9 @@ pub struct ShortcutConfig {
 
     /// 中 / 英切换键（Windows 用），可多选：`["shift", "control", "ctrl+alt+space"]`。详见 [`SwitchKeys`]。
     pub switch_mode: SwitchKeys,
+
+    /// 候选高亮由 `↑` / `↓` 还是 `←` / `→` 移动（Windows 用）。详见 [`HighlightKeys`]。
+    pub highlight_keys: HighlightKeys,
 
     /// Windows：切换当前中英模式的全 / 半角标点，空串禁用，例如 `ctrl+.`。
     #[serde(with = "super::optional_key_combo")]
@@ -50,6 +54,7 @@ impl Default for ShortcutConfig {
         Self {
             mode: ModeKeys::default(),
             switch_mode: SwitchKeys::default(),
+            highlight_keys: HighlightKeys::UpDown,
             toggle_punctuation: None,
             extra_page_keys: PageKeys::default(),
             translation,
@@ -174,5 +179,14 @@ mod tests {
         assert_eq!(off.switch_mode, crate::SwitchKeys::NONE);
         let missing: ShortcutConfig = toml::from_str("").unwrap();
         assert_eq!(missing.switch_mode, SwitchKeys::default());
+    }
+
+    #[test]
+    fn highlight_keys_parses_and_defaults_to_updown() {
+        let parsed: ShortcutConfig = toml::from_str("highlight_keys = \"leftright\"\n").unwrap();
+        assert_eq!(parsed.highlight_keys, HighlightKeys::LeftRight);
+        // 老配置没有这一项，行为保持以前：↑ / ↓ 移高亮
+        let missing: ShortcutConfig = toml::from_str("").unwrap();
+        assert_eq!(missing.highlight_keys, HighlightKeys::UpDown);
     }
 }

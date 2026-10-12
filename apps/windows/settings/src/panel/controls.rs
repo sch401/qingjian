@@ -3,10 +3,10 @@
 use std::path::{Path, PathBuf};
 
 use windows_reactor::{
-    AutomationExt, Border, Button, CheckBox, ChildrenControl, ContentControl, FontWeight, Grid,
-    GridChildExt, GridLength, HorizontalAlignment, KeyedView, LayoutControl, Orientation,
-    ScrollViewer, StackPanel, TextBlock, TextWrapping, ThemeBrush, VerticalAlignment, View,
-    ViewContext,
+    AutomationExt, Border, Button, Callback, CheckBox, ChildrenControl, ComboBox, ContentControl,
+    FontWeight, Grid, GridChildExt, GridLength, HorizontalAlignment, KeyedView, LayoutControl,
+    Orientation, ScrollViewer, StackPanel, TextBlock, TextWrapping, ThemeBrush, VerticalAlignment,
+    View, ViewContext,
 };
 
 use super::notice::Notice;
@@ -168,6 +168,19 @@ pub(super) fn section(title: &str, fields: impl IntoIterator<Item = View>) -> Vi
                 .map(|(index, view)| KeyedView::new(index.to_string(), view)),
         ),
     ])
+}
+
+/// 枚举下拉：按 `label()` 列项，选中 `current`（找不到取 0）。
+pub(super) fn mode_combo<T: PartialEq + Copy>(
+    all: &'static [T],
+    current: T,
+    label: fn(T) -> &'static str,
+    callback: Callback<Option<usize>>,
+) -> ComboBox {
+    ComboBox::new()
+        .items_source(all.iter().map(|mode| label(*mode)))
+        .selected_index(all.iter().position(|mode| *mode == current).unwrap_or(0))
+        .on_selection_changed(callback)
 }
 
 /// 在 `(界面名, 配置写法)` 列表里找 `value` 的下标，找不到取 0。
