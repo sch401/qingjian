@@ -18,6 +18,9 @@ pub(crate) enum Composed {
 
         /// 本地 + 云端槽位的候选布局。
         layout: CandidateLayout,
+
+        /// 正在等待的手动请求序号，收到后消费；重建输入时清除。
+        manual_sequence: Option<u64>,
     },
 
     /// 查询失败（如上屏后剩下不可切分的残余）：显示原始拼音、无候选。

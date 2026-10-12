@@ -38,6 +38,7 @@ impl Router {
                     cursor,
                     typed_keys,
                     layout,
+                    manual_sequence: None,
                 }
             }
             None => {
@@ -73,18 +74,37 @@ impl Router {
             }
             return;
         }
-        if let Some(Composed::Candidates { layout, .. }) = self.composed.as_mut() {
-            let words: Vec<Candidate> = prediction
+        if let Some(Composed::Candidates {
+            layout,
+            manual_sequence,
+            ..
+        }) = self.composed.as_mut()
+        {
+            let manual = manual_sequence.take() == Some(prediction.sequence);
+            if self.navigated || self.highlight >= self.config.page_size {
+                return;
+            }
+            let words = prediction
                 .words
                 .into_iter()
                 .map(CloudWord::into_candidate)
                 .collect();
-            layout.set_cloud(words);
+            if manual {
+                layout.set_cloud_first(words);
+            } else {
+                layout.set_cloud(words);
+            }
             self.sentence = prediction.sentence;
         }
     }
 
     pub(super) fn cancel_prediction(&mut self) {
+        if let Some(Composed::Candidates {
+            manual_sequence, ..
+        }) = self.composed.as_mut()
+        {
+            *manual_sequence = None;
+        }
         if self.engine.prediction_enabled() {
             self.engine.cancel_prediction();
         }
@@ -92,12 +112,42 @@ impl Router {
 
     /// DLL 送来新的光标前文后重发一次云联想：作废在飞的空上下文请求，让云端拿得到 before。
     pub(super) fn refresh_prediction(&mut self) {
-        let Some(Composed::Candidates { layout, .. }) = &self.composed else {
+        let Some(Composed::Candidates {
+            layout,
+            manual_sequence,
+            ..
+        }) = &self.composed
+        else {
             return;
         };
+        if manual_sequence.is_some() {
+            self.request_manual_prediction();
+            return;
+        }
+        // 手动结果已到后保持当前布局；新输入会重建状态并恢复自动联想。
+        if layout.cloud_first() {
+            return;
+        }
         let local = layout.local().to_vec();
         let surrounding = self.surrounding_for_prediction();
         self.engine.request_prediction(surrounding, &local);
+    }
+
+    /// 显式触发时使用同一份应用上下文，并记录序号供结果布局匹配。
+    pub(super) fn request_manual_prediction(&mut self) -> bool {
+        let surrounding = self.surrounding_for_prediction();
+        let Some(Composed::Candidates {
+            layout,
+            manual_sequence,
+            ..
+        }) = self.composed.as_mut()
+        else {
+            return false;
+        };
+        *manual_sequence = self
+            .engine
+            .request_manual_prediction(surrounding, layout.local());
+        manual_sequence.is_some()
     }
 
     /// DLL 报来的光标前文包成云联想要的形状；没有就 `None`（Engine 只靠拼音猜）。

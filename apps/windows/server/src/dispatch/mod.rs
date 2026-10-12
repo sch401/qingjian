@@ -187,6 +187,10 @@ impl Router {
             shift_letter_compose: self.config.shift_letter_compose,
             restore_mode: self.config.default_english || self.config.remember_mode_per_app,
             english_candidates: self.config.english_candidates_in(app),
+            predict: self
+                .engine
+                .prediction_enabled()
+                .then_some(self.config.predict),
         }
     }
 
